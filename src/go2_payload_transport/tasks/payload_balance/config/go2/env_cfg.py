@@ -3,215 +3,104 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-import math
-
-import isaaclab.sim as sim_utils
-from isaaclab.assets import ArticulationCfg, AssetBaseCfg
-from isaaclab.envs import ManagerBasedRLEnvCfg
-from isaaclab.managers import EventTermCfg as EventTerm
-from isaaclab.managers import ObservationGroupCfg as ObsGroup
-from isaaclab.managers import ObservationTermCfg as ObsTerm
-from isaaclab.managers import RewardTermCfg as RewTerm
-from isaaclab.managers import SceneEntityCfg
-from isaaclab.managers import TerminationTermCfg as DoneTerm
-from isaaclab.physics import PhysxAutoCfg
-from isaaclab.scene import InteractiveSceneCfg
+import numpy as np
 from isaaclab.utils.configclass import configclass
-from isaaclab.visualizers import VisualizerCfg
-from isaaclab_newton.physics import KaminoPADMMSolverCfg, MJWarpSolverCfg, NewtonCfg
-from isaaclab_ov.physics import OvPhysxCfg
-from isaaclab_physx.physics import PhysxCfg
-
-from isaaclab_tasks.utils import PresetCfg
-
-from ... import mdp
-
-##
-# Pre-defined configs
-##
-
-from isaaclab_assets.robots.cartpole import CARTPOLE_CFG  # isort:skip
+from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import SceneEntityCfg
+import isaaclab_tasks.core.velocity.mdp as mdp
+from isaaclab_tasks.core.velocity.config.go2.flat_env_cfg import UnitreeGo2FlatEnvCfg
 
 
 @configclass
-class PayloadBalancePhysicsCfg(PresetCfg):
-    """Physics presets for the generated cart-pole environment."""
+class UnitreeGo2FlatOmniEnvCfg(UnitreeGo2FlatEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
 
-    isaacsim_physx: PhysxCfg = PhysxCfg()
-    ovphysx: OvPhysxCfg = OvPhysxCfg()
-    physx: PhysxAutoCfg = PhysxAutoCfg(isaacsim_physx=isaacsim_physx, ovphysx=ovphysx)
-    newton_mjwarp: NewtonCfg = NewtonCfg(
-        solver_cfg=MJWarpSolverCfg(
-            njmax=5,
-            nconmax=3,
-            cone="pyramidal",
-            impratio=1,
-            integrator="implicitfast",
-        ),
-        num_substeps=1,
-        debug_mode=False,
-        use_cuda_graph=True,
-    )
-    newton_kamino: NewtonCfg = NewtonCfg(
-        solver_cfg=KaminoPADMMSolverCfg(sparse_jacobian=True),
-        debug_mode=False,
-        use_cuda_graph=True,
-    )
-    default: NewtonCfg = newton_mjwarp
-
-
-##
-# Scene definition
-##
+        # --- velocity ---
+        self.commands.base_velocity.heading_command = False
+        self.commands.base_velocity.ranges.heading = None
+        self.commands.base_velocity.ranges.lin_vel_x = (-1.0, 2.0)
+        self.commands.base_velocity.ranges.lin_vel_y = (-1.0, 1.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
+        # --- actions ---
+        self.actions.joint_pos.scale = 0.25
+        # --- rewards ---
+        self.rewards.track_lin_vel_xy_exp.weight = 1.5
+        self.rewards.track_ang_vel_z_exp.weight = 0.75
+        # self.rewards.lin_vel_z_l2.weight = -0.0002
+        # self.rewards.ang_vel_xy_l2.weight = -0.0002
+        # self.rewards.dof_torques_l2.weight = -0.0002
+        # self.rewards.dof_acc_l2.weight = -2.5e-7
+        # self.rewards.action_rate_l2.weight = -0.0002
+        # self.rewards.feet_air_time.weight = 0.01
+        # self.rewards.undesired_contacts = None
 
 
 @configclass
-class PayloadBalanceSceneCfg(InteractiveSceneCfg):
-    """Configuration for a cart-pole scene."""
+class UnitreeGo2FlatPayloadEnvCfg(UnitreeGo2FlatOmniEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
 
-    # ground plane
-    ground = AssetBaseCfg(
-        prim_path="/World/ground",
-        spawn=sim_utils.GroundPlaneCfg(size=(100.0, 100.0)),
-    )
+        # --- replace base mass with payload mass ---
+        # self.events.add_base_mass.params["mass_distribution_params"] = (0.0, 6.0)
+        # self.events.add_base_mass.params["operation"] = "add"
+        # self.events.add_base_mass.params["distribution"] = "uniform"
 
-    # robot
-    robot: ArticulationCfg = CARTPOLE_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-
-    # lights
-    dome_light = AssetBaseCfg(
-        prim_path="/World/DomeLight",
-        spawn=sim_utils.DomeLightCfg(color=(0.9, 0.9, 0.9), intensity=500.0),
-    )
-
-
-##
-# MDP settings
-##
+        # --- add payload mass ---
+        self.events.add_payload_mass = EventTerm(
+            func=mdp.randomize_rigid_body_mass,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("robot", body_names="base"),
+                "mass_distribution_params": (0.0, 6.0),
+                "operation": "add",
+                "distribution": "uniform",
+            },
+        )
 
 
 @configclass
-class ActionsCfg:
-    """Action specifications for the MDP."""
+class UnitreeGo2CircleEnvCfg(UnitreeGo2FlatPayloadEnvCfg):
+    """Evaluation only: one fixed circle, so runs are comparable."""
 
-    joint_effort = mdp.JointEffortActionCfg(asset_name="robot", joint_names=["slider_to_cart"], scale=100.0)
+    def __post_init__(self):
+        super().__post_init__()
+        self._set_circle_command()
 
+    def play_mode(self):
+        super().play_mode()      # the parent may reopen the command range
+        self._set_circle_command()   # so pin it again, last
 
-@configclass
-class ObservationsCfg:
-    """Observation specifications for the MDP."""
-
-    @configclass
-    class PolicyCfg(ObsGroup):
-        """Observations for policy group."""
-
-        # observation terms (order preserved)
-        joint_pos_rel = ObsTerm(func=mdp.joint_pos_rel)
-        joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel)
-
-        def __post_init__(self) -> None:
-            self.enable_corruption = False
-            self.concatenate_terms = True
-
-    # observation groups
-    policy: PolicyCfg = PolicyCfg()
+    def _set_circle_command(self):
+        speed, radius = 1.0, 1.0
+        self.commands.base_velocity.ranges.lin_vel_x = (speed, speed)
+        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (speed / radius, speed / radius)
+        self.commands.base_velocity.rel_standing_envs = 0.0
+        self.commands.base_velocity.resampling_time_range = (1.0e9, 1.0e9)  # never resample
 
 
 @configclass
-class EventCfg:
-    """Configuration for events."""
+class UnitreeGo2ZigZagEnvCfg(UnitreeGo2FlatPayloadEnvCfg):
+    """Evaluation only: one fixed zig-zag path, so runs are comparable."""
 
-    # reset
-    reset_cart_position = EventTerm(
-        func=mdp.reset_joints_by_offset,
-        mode="reset",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", joint_names=["slider_to_cart"]),
-            "position_range": (-1.0, 1.0),
-            "velocity_range": (-0.5, 0.5),
-        },
-    )
+    def __post_init__(self):
+        super().__post_init__()
+        self._set_zigzag_command()
 
-    reset_pole_position = EventTerm(
-        func=mdp.reset_joints_by_offset,
-        mode="reset",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", joint_names=["cart_to_pole"]),
-            "position_range": (-0.25 * math.pi, 0.25 * math.pi),
-            "velocity_range": (-0.25 * math.pi, 0.25 * math.pi),
-        },
-    )
+    def play_mode(self):
+        super().play_mode()      # the parent may reopen the command range
+        self._set_zigzag_command()   # so pin it again, last
 
-
-@configclass
-class RewardsCfg:
-    """Reward terms for the MDP."""
-
-    # (1) Constant running reward
-    alive = RewTerm(func=mdp.is_alive, weight=1.0)
-    # (2) Failure penalty
-    terminating = RewTerm(func=mdp.is_terminated, weight=-2.0)
-    # (3) Primary task: keep pole upright
-    pole_pos = RewTerm(
-        func=mdp.joint_pos_target_l2,
-        weight=-1.0,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=["cart_to_pole"]), "target": 0.0},
-    )
-    # (4) Shaping tasks: lower cart velocity
-    cart_vel = RewTerm(
-        func=mdp.joint_vel_l1,
-        weight=-0.01,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=["slider_to_cart"])},
-    )
-    # (5) Shaping tasks: lower pole angular velocity
-    pole_vel = RewTerm(
-        func=mdp.joint_vel_l1,
-        weight=-0.005,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=["cart_to_pole"])},
-    )
-
-
-@configclass
-class TerminationsCfg:
-    """Termination terms for the MDP."""
-
-    # (1) Time out
-    time_out = DoneTerm(func=mdp.time_out, time_out=True)
-    # (2) Cart out of bounds
-    cart_out_of_bounds = DoneTerm(
-        func=mdp.joint_pos_out_of_manual_limit,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=["slider_to_cart"]), "bounds": (-3.0, 3.0)},
-    )
-
-
-##
-# Environment configuration
-##
-
-
-@configclass
-class PayloadBalanceEnvCfg(ManagerBasedRLEnvCfg):
-    """Configuration for the generated cart-pole environment."""
-
-    # Scene settings
-    scene: PayloadBalanceSceneCfg = PayloadBalanceSceneCfg(num_envs=4096, env_spacing=4.0)
-    # Basic settings
-    observations: ObservationsCfg = ObservationsCfg()
-    actions: ActionsCfg = ActionsCfg()
-    events: EventCfg = EventCfg()
-    # MDP settings
-    rewards: RewardsCfg = RewardsCfg()
-    terminations: TerminationsCfg = TerminationsCfg()
-
-    # Post initialization
-    def __post_init__(self) -> None:
-        """Post initialization."""
-        # general settings
-        self.decimation = 2
-        self.episode_length_s = 5
-        # visualizer camera settings
-        self.sim.default_visualizer_cfg = VisualizerCfg(eye=(8.0, 0.0, 5.0))
-        # simulation settings
-        self.sim.dt = 1 / 120
-        self.sim.render_interval = self.decimation
-        self.sim.physics = PayloadBalancePhysicsCfg()
+    def _set_zigzag_command(self):
+        self.commands.base_velocity.heading_command = True
+        self.commands.base_velocity.rel_heading_envs = 1.0                          # every robot uses heading_command
+        self.commands.base_velocity.rel_standing_envs = 0.0                         # nothing standing
+        self.commands.base_velocity.heading_control_stiffness = 0.5                 # wz = 0.5 * heading_error
+        self.commands.base_velocity.ranges.heading = (-0.5, 0.5)                    # weave +- 0.5 radians
+        self.commands.base_velocity.ranges.lin_vel_x = (1.0, 1.0)                   # constant forward velocity
+        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)                   # no sideway motion
+        self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)                  # clip limits applied to yaw rate
+        self.commands.base_velocity.resampling_time_range = (2.0, 2.0)              # resample every 2 seconds
+        self.episode_length_s = 10.0
+        self.commands.base_velocity.debug_vis = True

@@ -13,17 +13,13 @@ import go2_payload_transport.tasks  # noqa: F401
 def test_task_registrations():
     """The generated tasks must expose valid environment and agent entry points."""
     expected = {
-        "Go2PayloadTransport-Payload-Balance-GO2": {
+        "Go2PayloadTransport-Flat-Omni-GO2": {
             "entry_point": "isaaclab.envs:ManagerBasedRLEnv",
-            "env_cfg_entry_point": "go2_payload_transport.tasks.payload_balance.config.go2.env_cfg:PayloadBalanceEnvCfg",
+            "env_cfg_entry_point": "go2_payload_transport.tasks.payload_balance.config.go2.env_cfg:UnitreeGo2FlatOmniEnvCfg",
         },
-        "Go2PayloadTransport-Payload-Balance-GO2-Direct": {
-            "entry_point": "go2_payload_transport.tasks.payload_balance_direct.config.go2.env:PayloadBalanceEnv",
-            "env_cfg_entry_point": "go2_payload_transport.tasks.payload_balance_direct.config.go2.env_cfg:PayloadBalanceEnvCfg",
-        },
-        "Go2PayloadTransport-Payload-Balance-Marl-GO2-Direct": {
-            "entry_point": "go2_payload_transport.tasks.payload_balance_marl_direct.config.go2.env:PayloadBalanceMarlEnv",
-            "env_cfg_entry_point": "go2_payload_transport.tasks.payload_balance_marl_direct.config.go2.env_cfg:PayloadBalanceMarlEnvCfg",
+        "Go2PayloadTransport-Flat-Payload-GO2": {
+            "entry_point": "isaaclab.envs:ManagerBasedRLEnv",
+            "env_cfg_entry_point": "go2_payload_transport.tasks.payload_balance.config.go2.env_cfg:UnitreeGo2FlatPayloadEnvCfg",
         },
     }
 
