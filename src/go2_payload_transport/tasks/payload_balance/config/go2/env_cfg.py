@@ -1,14 +1,11 @@
-# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
-# All rights reserved.
-#
-# SPDX-License-Identifier: BSD-3-Clause
-
 import numpy as np
 from isaaclab.utils.configclass import configclass
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
 import isaaclab_tasks.core.velocity.mdp as mdp
 from isaaclab_tasks.core.velocity.config.go2.flat_env_cfg import UnitreeGo2FlatEnvCfg
+from go2_payload_transport.tasks.payload_balance.mdp.commands import S_CurveVelocityCommandCfg
+from go2_payload_transport.tasks.payload_balance.mdp.commands import ZigZagVelocityCommandCfg
 
 
 @configclass
@@ -70,6 +67,7 @@ class UnitreeGo2CircleEnvCfg(UnitreeGo2FlatPayloadEnvCfg):
     def play_mode(self):
         super().play_mode()      # the parent may reopen the command range
         self._set_circle_command()   # so pin it again, last
+        self.scene.num_envs = min(self.scene.num_envs, 16)  # limit the number of environments to 16
 
     def _set_circle_command(self):
         speed, radius = 1.0, 1.0
@@ -78,6 +76,41 @@ class UnitreeGo2CircleEnvCfg(UnitreeGo2FlatPayloadEnvCfg):
         self.commands.base_velocity.ranges.ang_vel_z = (speed / radius, speed / radius)
         self.commands.base_velocity.rel_standing_envs = 0.0
         self.commands.base_velocity.resampling_time_range = (1.0e9, 1.0e9)  # never resample
+
+
+@configclass
+class UnitreeGo2SCurveEnvCfg(UnitreeGo2FlatPayloadEnvCfg):
+    """Evaluation only: one fixed S-curve path, so runs are comparable."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self._set_s_curve_command()
+
+    def play_mode(self):
+        super().play_mode()      # the parent may reopen the command range
+        self.scene.num_envs = min(self.scene.num_envs, 16)  # limit the number of environments to 1
+
+        self._set_s_curve_command()   # so pin it again, last
+
+    def _set_s_curve_command(self):
+        self.commands.base_velocity = S_CurveVelocityCommandCfg(
+            asset_name="robot",
+            heading_amplitude=1.0,
+            turn_speed=1.0,
+            resampling_time_range=(1.0, 1.0),
+            ranges=S_CurveVelocityCommandCfg.Ranges(
+                lin_vel_x=(1.0, 1.0),
+                lin_vel_y=(0.0, 0.0),
+                ang_vel_z=(-1.0, 1.0),
+                heading=None,
+            ),
+            heading_control_stiffness=0.5,
+            rel_heading_envs=1.0,
+            rel_standing_envs=0.0,
+            heading_command=False,
+            debug_vis=True,
+        )
+        self.episode_length_s = 10.0
 
 
 @configclass
@@ -93,14 +126,21 @@ class UnitreeGo2ZigZagEnvCfg(UnitreeGo2FlatPayloadEnvCfg):
         self._set_zigzag_command()   # so pin it again, last
 
     def _set_zigzag_command(self):
-        self.commands.base_velocity.heading_command = True
-        self.commands.base_velocity.rel_heading_envs = 1.0                          # every robot uses heading_command
-        self.commands.base_velocity.rel_standing_envs = 0.0                         # nothing standing
-        self.commands.base_velocity.heading_control_stiffness = 0.5                 # wz = 0.5 * heading_error
-        self.commands.base_velocity.ranges.heading = (-0.5, 0.5)                    # weave +- 0.5 radians
-        self.commands.base_velocity.ranges.lin_vel_x = (1.0, 1.0)                   # constant forward velocity
-        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)                   # no sideway motion
-        self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)                  # clip limits applied to yaw rate
-        self.commands.base_velocity.resampling_time_range = (2.0, 2.0)              # resample every 2 seconds
+        self.commands.base_velocity = ZigZagVelocityCommandCfg(
+            asset_name="robot",
+            ranges=ZigZagVelocityCommandCfg.Ranges(
+                lin_vel_x=(1.0, 1.0),
+                lin_vel_y=(0.0, 0.0),
+                ang_vel_z=(-1.0, 1.0),
+                heading=(0.5, 0.5),
+            ),
+            heading_control_stiffness=4.0,
+            rel_heading_envs=1.0,
+            rel_standing_envs=0.0,
+            heading_command=True,
+            debug_vis=True,
+        )
         self.episode_length_s = 10.0
-        self.commands.base_velocity.debug_vis = True
+        self.events.reset_base.params["pose_range"]["yaw"] = (0.0, 0.0)
+
+
