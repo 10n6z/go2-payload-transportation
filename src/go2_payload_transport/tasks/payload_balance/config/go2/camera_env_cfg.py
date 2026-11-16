@@ -15,7 +15,8 @@ import math
 import isaaclab.sim as sim_utils
 from isaaclab.assets import AssetBaseCfg
 from isaaclab.sensors import TiledCameraCfg
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
+from isaaclab_newton.renderers import NewtonWarpRendererCfg
 
 from .platform_env_cfg import SceneEntityCfg as PayloadSceneCfg
 from .platform_env_cfg import UnitreeGo2RandomPayloadMassEnvCfg, _spawn_fixed_platform
@@ -88,6 +89,8 @@ D435I_CAMERA = TiledCameraCfg(
     height=480,
     width=640,
     data_types=["rgb", "distance_to_image_plane"],  # = RealSense z-depth
+    # Kitless Newton renderer: the default (Isaac RTX) needs Isaac Sim / omni.usd.
+    renderer_cfg=NewtonWarpRendererCfg(),
     # D435i color @640x480: fx = fy ~ 615 px, cx ~ 320, cy ~ 240 (check your rs intrinsics)
     spawn=sim_utils.PinholeCameraCfg.from_intrinsic_matrix(
         intrinsic_matrix=[615.0, 0.0, 320.0, 0.0, 615.0, 240.0, 0.0, 0.0, 1.0],
