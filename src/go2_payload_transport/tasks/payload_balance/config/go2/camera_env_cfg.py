@@ -11,6 +11,7 @@ x forward, y left, z up, metres):
 """
 
 import math
+import os
 from pathlib import Path
 
 import isaaclab.sim as sim_utils
@@ -18,9 +19,9 @@ from isaaclab.assets import AssetBaseCfg
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.sensors import TiledCameraCfg
 from isaaclab.utils.configclass import configclass
-from isaaclab.visualizers import VisualizerCfg
 from isaaclab_newton.renderers import NewtonWarpRendererCfg
 
+from .env_cfg import UnitreeGo2SCurveEnvCfg, UnitreeGo2ZigZagEnvCfg
 from .platform_env_cfg import SceneEntityCfg as PayloadSceneCfg
 from .platform_env_cfg import (
     PayloadRandomizeEventCfg,
@@ -148,12 +149,10 @@ class PayloadCameraSceneCfg(PayloadSceneCfg):
     d435i: TiledCameraCfg = D435I_CAMERA
 
 
-DEMO_SPEED = 0.5  # [m/s] forward walking speed commanded in the play env
-# Viewer camera for the recorded clip; it follows env 0's robot in x/y.
-# Shrink the offset or raise the focal length to zoom in.
-VIDEO_EYE_OFFSET = (0.9, -1.6, 0.7)  # [m] eye relative to the robot's ground position (world axes)
-VIDEO_LOOKAT_Z = 0.4                 # [m] fixed aim height, so the view does not bob with the gait
-VIDEO_FOCAL_MM = 18.0
+# Walking pattern of the play env: "straight", "s_curve", "zigzag" or "random".
+# Override per run without editing:  DEMO_PATH=zigzag isaaclab play ...
+DEMO_PATH = os.environ.get("DEMO_PATH", "s_curve")
+DEMO_SPEED = 0.5  # [m/s] forward speed for "straight"; s_curve/zigzag use the 1.0 m/s fixed in mdp/commands.py
 FRAME_DIR = Path("outputs/d435i")
 DEPTH_VIS_MAX = 1.0  # [m] depth mapped to white in depth.png
 
@@ -170,18 +169,9 @@ def _save_camera_frame(env, env_ids, sensor_name: str = "d435i") -> None:
     Image.fromarray(depth_u8.cpu().numpy()).save(FRAME_DIR / "depth.png")
 
 
-def _follow_robot(env, env_ids) -> None:
-    """Keep the viewer camera at a fixed world-axis offset from env 0's robot."""
-    pos = env.scene["robot"].data.root_pos_w
-    x, y = getattr(pos, "torch", pos)[0, :2].tolist()
-    ox, oy, oz = VIDEO_EYE_OFFSET
-    env.sim.set_camera_view((x + ox, y + oy, oz), (x, y, VIDEO_LOOKAT_Z))
-
-
 @configclass
 class PayloadCameraEventCfg(PayloadRandomizeEventCfg):
     save_camera_frame = EventTerm(func=_save_camera_frame, mode="interval", interval_range_s=(1.0, 1.0))
-    follow_robot = EventTerm(func=_follow_robot, mode="interval", interval_range_s=(0.0, 0.0))  # every step
 
 
 @configclass
@@ -197,19 +187,29 @@ class UnitreeGo2PayloadCameraEnvCfg_PLAY(UnitreeGo2RandomPayloadMassEnvCfg):
 
     def __post_init__(self):
         super().__post_init__()
-        # Demo conditions: payload dead centre on the platform, steady straight walk.
+        # Demo conditions: payload dead centre on the platform.
         self.events.reset_payload.params["position_range"] = {}
-        cmd = self.commands.base_velocity
-        cmd.heading_command = False
-        cmd.rel_standing_envs = 0.0
-        cmd.ranges.lin_vel_x = (DEMO_SPEED, DEMO_SPEED)
-        cmd.ranges.lin_vel_y = (0.0, 0.0)
-        cmd.ranges.ang_vel_z = (0.0, 0.0)
-        cmd.debug_vis = False  # no velocity arrows above the robot
         # Start at the env origin facing +x and at rest, so every clip looks the same.
         self.events.reset_base.params["pose_range"] = {}
         self.events.reset_base.params["velocity_range"] = {}
-        # Initial view; _follow_robot then tracks the robot each step.
-        self.sim.default_visualizer_cfg = VisualizerCfg(
-            eye=VIDEO_EYE_OFFSET, lookat=(0.0, 0.0, VIDEO_LOOKAT_Z), focal_length=VIDEO_FOCAL_MM
-        )
+
+        cmd = self.commands.base_velocity
+        cmd.heading_command = False
+        cmd.rel_standing_envs = 0.0
+        cmd.ranges.lin_vel_y = (0.0, 0.0)
+        if DEMO_PATH == "straight":
+            cmd.ranges.lin_vel_x = (DEMO_SPEED, DEMO_SPEED)
+            cmd.ranges.ang_vel_z = (0.0, 0.0)
+        elif DEMO_PATH == "random":
+            # New forward speed and turn rate every 1.5-3 s.
+            cmd.ranges.lin_vel_x = (0.3, 1.0)
+            cmd.ranges.ang_vel_z = (-1.0, 1.0)
+            cmd.resampling_time_range = (1.5, 3.0)
+        elif DEMO_PATH == "s_curve":
+            # Same command as the SCurve / ZigZag evaluation tasks, so the paths stay in sync.
+            UnitreeGo2SCurveEnvCfg._set_s_curve_command(self)
+        elif DEMO_PATH == "zigzag":
+            UnitreeGo2ZigZagEnvCfg._set_zigzag_command(self)
+        else:
+            raise ValueError(f"DEMO_PATH={DEMO_PATH!r}: expected straight, s_curve, zigzag or random.")
+        self.commands.base_velocity.debug_vis = False  # no velocity arrows above the robot
