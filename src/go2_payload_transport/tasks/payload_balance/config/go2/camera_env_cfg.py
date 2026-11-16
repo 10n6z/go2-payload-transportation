@@ -28,14 +28,15 @@ from .platform_env_cfg import (
 )
 
 # ---- placeholders -------------------------------------------------------------
-POLE_X = -0.16          # [m] rear end of the back
+POLE_X = 0.10          # [m] rear end of the back
 POLE_Y = 0.0            # [m]
 BASE_TOP_Z = 0.055      # [m] platform underside sits ~here (platform center z = 0.065)
 POLE_HEIGHT = 0.40      # [m] memory note: camera ~40 cm above the platform
 POLE_RADIUS = 0.01      # [m]
 POLE_MASS = 0.15        # [kg] pole + screws
 CAM_MASS = 0.072        # [kg] D435i datasheet mass
-CAM_FORWARD = 0.145     # [m] horizontal arm so the lens sits over the platform center (x = -0.015)
+CAM_FORWARD = -0.02      # [m] horizontal arm so the lens sits over the platform center (x = -0.015)
+CAM_DOWN = -0.05         # [m] cam attached to the top of the pole not on top
 CAM_TILT_DEG = 0.0      # [deg]
 
 
@@ -87,7 +88,7 @@ POLE_POS_IN_BASE = (POLE_X, POLE_Y, BASE_TOP_Z + POLE_HEIGHT / 2)  # cylinder or
 # ---- 2) the camera: a sensor attached to the base with an offset -------------
 # Pole is welded, so "pole top" and "base + offset" move identically; attaching
 # to the base avoids an extra prim lookup.
-CAM_POS_IN_BASE = (POLE_X + CAM_FORWARD, POLE_Y, BASE_TOP_Z + POLE_HEIGHT)
+CAM_POS_IN_BASE = (POLE_X + CAM_FORWARD, POLE_Y, BASE_TOP_Z + POLE_HEIGHT + CAM_DOWN)
 
 D435I_CAMERA = TiledCameraCfg(
     prim_path="{ENV_REGEX_NS}/Robot/base/d435i",
