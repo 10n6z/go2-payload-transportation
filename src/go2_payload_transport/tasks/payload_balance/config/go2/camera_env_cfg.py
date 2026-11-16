@@ -147,6 +147,7 @@ class PayloadCameraSceneCfg(PayloadSceneCfg):
     d435i: TiledCameraCfg = D435I_CAMERA
 
 
+DEMO_SPEED = 0.5  # [m/s] forward walking speed commanded in the play env
 FRAME_DIR = Path("outputs/d435i")
 DEPTH_VIS_MAX = 1.0  # [m] depth mapped to white in depth.png
 
@@ -178,3 +179,14 @@ class UnitreeGo2PayloadCameraEnvCfg_PLAY(UnitreeGo2RandomPayloadMassEnvCfg):
 
     scene: PayloadCameraSceneCfg = PayloadCameraSceneCfg(num_envs=4, env_spacing=2.5)
     events: PayloadCameraEventCfg = PayloadCameraEventCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        # Demo conditions: payload dead centre on the platform, steady straight walk.
+        self.events.reset_payload.params["position_range"] = {}
+        cmd = self.commands.base_velocity
+        cmd.heading_command = False
+        cmd.rel_standing_envs = 0.0
+        cmd.ranges.lin_vel_x = (DEMO_SPEED, DEMO_SPEED)
+        cmd.ranges.lin_vel_y = (0.0, 0.0)
+        cmd.ranges.ang_vel_z = (0.0, 0.0)
