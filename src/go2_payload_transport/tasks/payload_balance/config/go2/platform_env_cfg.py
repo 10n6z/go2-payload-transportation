@@ -130,7 +130,7 @@ PLATFORM_CFG = AssetBaseCfg(
             density=None,
         ),
         visual_material=PreviewSurfaceCfg(
-            diffuse_color=(1.0, 1.0, 1.0),
+            diffuse_color=(0.0, 0.2, 1.0),
             emissive_color=(0.0, 0.0, 0.0),
             roughness=0.0,
             metallic=0.0,
@@ -159,7 +159,7 @@ PAYLOAD_CFG = RigidObjectCfg(
             rest_offset=0.0,
         ),
         visual_material=PreviewSurfaceCfg(
-            diffuse_color=(1.0, 1.0, 1.0),
+            diffuse_color=(1.0, 0.4, 0.0),
             emissive_color=(0.0, 0.0, 0.0),
             roughness=0.0,
             metallic=0.0,
