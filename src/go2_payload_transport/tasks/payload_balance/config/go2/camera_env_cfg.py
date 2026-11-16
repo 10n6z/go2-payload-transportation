@@ -11,15 +11,21 @@ x forward, y left, z up, metres):
 """
 
 import math
+from pathlib import Path
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import AssetBaseCfg
+from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.sensors import TiledCameraCfg
 from isaaclab.utils.configclass import configclass
 from isaaclab_newton.renderers import NewtonWarpRendererCfg
 
 from .platform_env_cfg import SceneEntityCfg as PayloadSceneCfg
-from .platform_env_cfg import UnitreeGo2RandomPayloadMassEnvCfg, _spawn_fixed_platform
+from .platform_env_cfg import (
+    PayloadRandomizeEventCfg,
+    UnitreeGo2RandomPayloadMassEnvCfg,
+    _spawn_fixed_platform,
+)
 
 # ---- placeholders -------------------------------------------------------------
 POLE_X = -0.16          # [m] rear end of the back
@@ -113,11 +119,52 @@ POLE_CFG = AssetBaseCfg(
     spawn=POLE_SPAWN.replace(func=_spawn_fixed_platform),
 )
 
+# Visible stand-in for the D435i housing (90 x 25 x 25 mm); the sensor prim itself has no geometry.
+# Sits just above the lens point so the camera never sees its own body. Mass is already lumped in the pole.
+# ponytail: box stays level, ignores CAM_TILT_DEG; rotate it too if the tilt becomes non-zero.
+CAM_BODY_SIZE = (0.025, 0.09, 0.025)
+CAM_BODY_CFG = AssetBaseCfg(
+    prim_path="{ENV_REGEX_NS}/Robot/base/CameraBody",
+    init_state=AssetBaseCfg.InitialStateCfg(
+        pos=(CAM_POS_IN_BASE[0], CAM_POS_IN_BASE[1], CAM_POS_IN_BASE[2] + CAM_BODY_SIZE[2] / 2 + 0.002)
+    ),
+    spawn=sim_utils.CuboidCfg(
+        func=_spawn_fixed_platform,
+        size=CAM_BODY_SIZE,
+        rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+        mass_props=sim_utils.MassPropertiesCfg(mass=0.001),
+        collision_props=sim_utils.CollisionPropertiesCfg(),
+        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.1, 0.1)),
+    ),
+)
+
 
 @configclass
 class PayloadCameraSceneCfg(PayloadSceneCfg):
     pole: AssetBaseCfg = POLE_CFG
+    camera_body: AssetBaseCfg = CAM_BODY_CFG
     d435i: TiledCameraCfg = D435I_CAMERA
+
+
+FRAME_DIR = Path("outputs/d435i")
+DEPTH_VIS_MAX = 1.0  # [m] depth mapped to white in depth.png
+
+
+def _save_camera_frame(env, env_ids, sensor_name: str = "d435i") -> None:
+    """Overwrite outputs/d435i/{rgb,depth}.png with env 0's latest frame (debug view)."""
+    from PIL import Image  # noqa: PLC0415
+
+    out = env.scene[sensor_name].data.output
+    rgb, depth = (getattr(out[k], "torch", out[k])[0] for k in ("rgb", "distance_to_image_plane"))
+    FRAME_DIR.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(rgb[..., :3].cpu().numpy()).save(FRAME_DIR / "rgb.png")
+    depth_u8 = (depth[..., 0].clamp(0.0, DEPTH_VIS_MAX) / DEPTH_VIS_MAX * 255).byte()
+    Image.fromarray(depth_u8.cpu().numpy()).save(FRAME_DIR / "depth.png")
+
+
+@configclass
+class PayloadCameraEventCfg(PayloadRandomizeEventCfg):
+    save_camera_frame = EventTerm(func=_save_camera_frame, mode="interval", interval_range_s=(1.0, 1.0))
 
 
 @configclass
@@ -129,3 +176,4 @@ class UnitreeGo2PayloadCameraEnvCfg_PLAY(UnitreeGo2RandomPayloadMassEnvCfg):
     """
 
     scene: PayloadCameraSceneCfg = PayloadCameraSceneCfg(num_envs=4, env_spacing=2.5)
+    events: PayloadCameraEventCfg = PayloadCameraEventCfg()
