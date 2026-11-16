@@ -1,18 +1,20 @@
 from __future__ import annotations
 
-import math
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pxr import Usd
+    from isaaclab.assets import Articulation
+    from isaaclab.envs import ManagerBasedRLEnv
 
-from isaaclab.assets import AssetBaseCfg, RigidObjectCfg
-from isaaclab.sim.schemas import MassPropertiesCfg
-from isaaclab.sim.schemas import CollisionBaseCfg
-from isaaclab.sim.schemas import UsdPhysicsRigidBodyCfg
+import torch
+
+from isaaclab.assets import AssetBaseCfg, RigidObjectCfg, RigidObject
 from isaaclab.sim.spawners.materials.visual_materials_cfg import PreviewSurfaceCfg
 from isaaclab.sim.spawners.materials.physics_materials_cfg import RigidBodyMaterialBaseCfg
 import isaaclab.sim as sim_utils
+from isaaclab.utils.math import sample_uniform, quat_apply
 from isaaclab.utils.configclass import configclass
 from isaaclab_tasks.core.velocity.velocity_env_cfg import MySceneCfg
 from isaaclab_tasks.core.velocity.config.go2.flat_env_cfg import UnitreeGo2FlatEnvCfg
@@ -22,10 +24,11 @@ from isaaclab_tasks.core.velocity.velocity_env_cfg import EventsCfg
 
 import isaaclab_tasks.core.velocity.mdp as mdp
 
-PLATFORM_SIZE = (0.23, 0.2, 0.01)
+PLATFORM_SIZE = (0.23, 0.2, 0.02)
 PLATFORM_MASS = 0.005
 PLATFORM_POSITION = (-0.015, 0.0, 0.065)
 PLATFORM_ROTATION = (0.0, 0.0, 0.0, 1.0)
+
 
 def _spawn_fixed_platform(
     # Reference: isaaclab_tasks.contrib.ur10_particle_push.ur10_particle_push_env_cfg.py
@@ -39,7 +42,7 @@ def _spawn_fixed_platform(
     # Keep both the USD imports and clone-wrapper resolution behind SimulationApp startup.
     # Importing either at config-parse time loads the kit-less ``usd-core`` bindings and
     # corrupts Kit's own USD binding registration.
-    from pxr import Gf, Sdf, UsdGeom, UsdPhysics  # noqa: PLC0415
+    from pxr import Gf, Sdf, UsdPhysics  # noqa: PLC0415
 
     @sim_utils.clone
     def _spawn_one(
@@ -75,9 +78,39 @@ def _spawn_fixed_platform(
     return _spawn_one(prim_path, cfg, translation=translation, orientation=orientation, **kwargs)
 
 
+def _spawn_randomized_payload(
+    # reference: isaaclab_tasks.core.lift.mdp.events.py
+    env: ManagerBasedRLEnv,
+    env_ids: Sequence[int],
+    position_range: dict[str, tuple[float, float]],
+    spawn_height: float = 0.155,
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    payload_cfg: SceneEntityCfg = SceneEntityCfg("payload"),
+) -> None:
+    """Spawn a payload and its position relative to the robot's base"""
+    robot: Articulation = env.scene[robot_cfg.name]
+    payload: RigidObject = env.scene[payload_cfg.name]
+    # reset root state
+    ranges = torch.tensor([position_range.get(key, (0.0, 0.0))
+                          for key in ("x", "y", "z")], device=robot.device)
+    offset = sample_uniform(ranges[:, 0], ranges[:, 1], (len(env_ids), 3),
+                            device=robot.device)
+    offset[:, 2] = spawn_height
+
+    root_pose = robot.data.root_link_pose_w.torch[env_ids].clone()
+    root_pose[:, :3] += quat_apply(robot.data.root_quat_w.torch[env_ids], offset)
+
+    payload.write_root_pose_to_sim_index(root_pose=root_pose, env_ids=env_ids)
+    payload.write_root_velocity_to_sim_index(
+        root_velocity=torch.zeros_like(
+            payload.data.default_root_vel.torch[env_ids]), env_ids=env_ids
+    )
+
+
 PLATFORM_CFG = AssetBaseCfg(
-    prim_path="{ENV_REGEX_NS}/Robot/base/platform",
-    init_state=AssetBaseCfg.InitialStateCfg(pos=PLATFORM_POSITION, rot=PLATFORM_ROTATION),
+    prim_path="{ENV_REGEX_NS}/Robot/base/Platform",
+    init_state=AssetBaseCfg.InitialStateCfg(
+        pos=PLATFORM_POSITION, rot=PLATFORM_ROTATION),
     spawn=sim_utils.CuboidCfg(
         func=_spawn_fixed_platform,
         size=PLATFORM_SIZE,
@@ -106,12 +139,12 @@ PLATFORM_CFG = AssetBaseCfg(
 
 
 PAYLOAD_CFG = RigidObjectCfg(
-    prim_path="{ENV_REGEX_NS}/object",
+    prim_path="{ENV_REGEX_NS}/Payload",
     spawn=sim_utils.CylinderCfg(
-        radius=0.4,
-        height=0.4,
+        radius=0.04,
+        height=0.04,
         mass_props=sim_utils.MassPropertiesCfg(
-            mass=0.7,
+            mass=0.07,
         ),
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             rigid_body_enabled=True,
@@ -140,14 +173,15 @@ PAYLOAD_CFG = RigidObjectCfg(
     init_state=RigidObjectCfg.InitialStateCfg(pos=(0.0, 0.0, 0.455), rot=(0.0, 0.0, 0.0, 1.0)),
 )
 
+
 @configclass
-class PlatformRandomizeEventCfg(EventsCfg):
-    "Configuration for randomizing the platform mass"
-    platform_physics_material = EventTerm(
+class PayloadRandomizeEventCfg(EventsCfg):
+    "Configuration for randomizing the payload"
+    payload_physics_material = EventTerm(
         func=mdp.randomize_rigid_body_material,
         mode="startup",
         params={
-            "asset_cfg": SceneEntityCfg("platform"),
+            "asset_cfg": SceneEntityCfg("payload"),
             "static_friction_range": (1.0, 1.2),
             "dynamic_friction_range": (1.0, 1.2),
             "restitution_range": (0.0, 0.0),
@@ -155,66 +189,42 @@ class PlatformRandomizeEventCfg(EventsCfg):
         }
     )
 
-    # platform_abs_mass = EventTerm(
-    #     func=mdp.randomize_rigid_body_mass,
-    #     mode="startup",
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("platform"),
-    #         "mass_distribution_params": (0.5, 0.5),
-    #         "operation": "abs",
-    #         "distribution": "uniform",
-    #         "recompute_inertia": True,
-    #     }
-    # )
+    payload_abs_mass = EventTerm(
+        func=mdp.randomize_rigid_body_mass,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("payload"),
+            "mass_distribution_params": (0.7, 0.7),
+            "operation": "abs",
+            "distribution": "uniform",
+            "recompute_inertia": True,
+        }
+    )
 
-    # platform_abs_inertia = EventTerm(
-    #     func=mdp.randomize_rigid_body_inertia,
-    #     mode="startup",
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("plaform"),
-    #         "inertia_distribution_params": (0.5, 0.5),
-    #         "operation": "abs",
-    #         "distribution": "uniform",
-    #     }
-    # )
-
-    # platform_com = EventTerm(
-    #     func=mdp.randomize_rigid_body_com,
-    #     mode="startup",
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("plaform"),
-    #         "com_range": (0.0, 0.0),
-    #     }
-    # )    
-    
-
-    reset_platform = EventTerm(
-        func=mdp.reset_root_state_uniform,
+    reset_payload = EventTerm(
+        func=_spawn_randomized_payload,
         mode="reset",
         params={
-            "asset_cfg": SceneEntityCfg("platform"),
-            "pose_range": {"x": (0.0, 0.0), "y": (0.0, 0.0), "yaw": (0.0, 0.0)},
-            "velocity_range": {},
+            "robot_cfg": SceneEntityCfg("robot"),
+            "payload_cfg": SceneEntityCfg("payload"),
+            "position_range": {"x": (-0.05, 0.05), "y": (-0.05, 0.05)},
         },
     )
 
 
-
 @configclass
-class PlatformSceneEntityCfg(MySceneCfg):
+class SceneEntityCfg(MySceneCfg):
     platform: AssetBaseCfg = PLATFORM_CFG
+    payload: RigidObjectCfg = PAYLOAD_CFG
 
 
 @configclass
-class UnitreeGo2RandomPlatformMassEnvCfg(UnitreeGo2FlatEnvCfg):
-    scene: PlatformSceneEntityCfg = PlatformSceneEntityCfg(num_envs=4096, env_spacing=2.5)
-    # events: PlatformRandomizeEventCfg = PlatformRandomizeEventCfg()
+class UnitreeGo2RandomPayloadMassEnvCfg(UnitreeGo2FlatEnvCfg):
+    scene: SceneEntityCfg = SceneEntityCfg(num_envs=4096, env_spacing=2.5)
+    events: PayloadRandomizeEventCfg = PayloadRandomizeEventCfg()
 
     def __post_init__(self):
         super().__post_init__()
 
         # self.events.reset_base.params["pose_range"] = {"yaw": (0.0, 0.0)}
         # self.events.reset_base.params["velocity_range"] = {}
-
-
-

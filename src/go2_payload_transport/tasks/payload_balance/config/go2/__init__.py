@@ -74,7 +74,7 @@ gym.register(
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": f"{__name__}.platform_env_cfg:UnitreeGo2RandomPlatformMassEnvCfg",
+        "env_cfg_entry_point": f"{__name__}.platform_env_cfg:UnitreeGo2RandomPayloadMassEnvCfg",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:UnitreeGo2FlatPayloadPPORunnerCfg",
         "default_agent": "rsl_rl",
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_flat_ppo_cfg.yaml",
