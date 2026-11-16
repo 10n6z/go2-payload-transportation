@@ -18,6 +18,7 @@ from isaaclab.assets import AssetBaseCfg
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.sensors import TiledCameraCfg
 from isaaclab.utils.configclass import configclass
+from isaaclab.visualizers import VisualizerCfg
 from isaaclab_newton.renderers import NewtonWarpRendererCfg
 
 from .platform_env_cfg import SceneEntityCfg as PayloadSceneCfg
@@ -148,6 +149,10 @@ class PayloadCameraSceneCfg(PayloadSceneCfg):
 
 
 DEMO_SPEED = 0.5  # [m/s] forward walking speed commanded in the play env
+# Viewer camera for the recorded clip, framed for a 5 s walk. Move the eye closer or raise the focal length to zoom in.
+VIDEO_EYE = (1.25, -2.2, 0.8)     # [m]
+VIDEO_LOOKAT = (1.25, 0.0, 0.3)   # [m]
+VIDEO_FOCAL_MM = 14.0
 FRAME_DIR = Path("outputs/d435i")
 DEPTH_VIS_MAX = 1.0  # [m] depth mapped to white in depth.png
 
@@ -190,3 +195,9 @@ class UnitreeGo2PayloadCameraEnvCfg_PLAY(UnitreeGo2RandomPayloadMassEnvCfg):
         cmd.ranges.lin_vel_x = (DEMO_SPEED, DEMO_SPEED)
         cmd.ranges.lin_vel_y = (0.0, 0.0)
         cmd.ranges.ang_vel_z = (0.0, 0.0)
+        cmd.debug_vis = False  # no velocity arrows above the robot
+        # Start at the env origin facing +x and at rest, so the walk stays inside the fixed video frame.
+        self.events.reset_base.params["pose_range"] = {}
+        self.events.reset_base.params["velocity_range"] = {}
+        # Side view (world frame, env 0). The robot covers x = 0 .. DEMO_SPEED * clip length.
+        self.sim.default_visualizer_cfg = VisualizerCfg(eye=VIDEO_EYE, lookat=VIDEO_LOOKAT, focal_length=VIDEO_FOCAL_MM)
