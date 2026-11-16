@@ -149,10 +149,11 @@ class PayloadCameraSceneCfg(PayloadSceneCfg):
 
 
 DEMO_SPEED = 0.5  # [m/s] forward walking speed commanded in the play env
-# Viewer camera for the recorded clip, framed for a 5 s walk. Move the eye closer or raise the focal length to zoom in.
-VIDEO_EYE = (1.25, -2.2, 0.8)     # [m]
-VIDEO_LOOKAT = (1.25, 0.0, 0.3)   # [m]
-VIDEO_FOCAL_MM = 14.0
+# Viewer camera for the recorded clip; it follows env 0's robot in x/y.
+# Shrink the offset or raise the focal length to zoom in.
+VIDEO_EYE_OFFSET = (0.9, -1.6, 0.7)  # [m] eye relative to the robot's ground position (world axes)
+VIDEO_LOOKAT_Z = 0.4                 # [m] fixed aim height, so the view does not bob with the gait
+VIDEO_FOCAL_MM = 18.0
 FRAME_DIR = Path("outputs/d435i")
 DEPTH_VIS_MAX = 1.0  # [m] depth mapped to white in depth.png
 
@@ -169,9 +170,18 @@ def _save_camera_frame(env, env_ids, sensor_name: str = "d435i") -> None:
     Image.fromarray(depth_u8.cpu().numpy()).save(FRAME_DIR / "depth.png")
 
 
+def _follow_robot(env, env_ids) -> None:
+    """Keep the viewer camera at a fixed world-axis offset from env 0's robot."""
+    pos = env.scene["robot"].data.root_pos_w
+    x, y = getattr(pos, "torch", pos)[0, :2].tolist()
+    ox, oy, oz = VIDEO_EYE_OFFSET
+    env.sim.set_camera_view((x + ox, y + oy, oz), (x, y, VIDEO_LOOKAT_Z))
+
+
 @configclass
 class PayloadCameraEventCfg(PayloadRandomizeEventCfg):
     save_camera_frame = EventTerm(func=_save_camera_frame, mode="interval", interval_range_s=(1.0, 1.0))
+    follow_robot = EventTerm(func=_follow_robot, mode="interval", interval_range_s=(0.0, 0.0))  # every step
 
 
 @configclass
@@ -196,8 +206,10 @@ class UnitreeGo2PayloadCameraEnvCfg_PLAY(UnitreeGo2RandomPayloadMassEnvCfg):
         cmd.ranges.lin_vel_y = (0.0, 0.0)
         cmd.ranges.ang_vel_z = (0.0, 0.0)
         cmd.debug_vis = False  # no velocity arrows above the robot
-        # Start at the env origin facing +x and at rest, so the walk stays inside the fixed video frame.
+        # Start at the env origin facing +x and at rest, so every clip looks the same.
         self.events.reset_base.params["pose_range"] = {}
         self.events.reset_base.params["velocity_range"] = {}
-        # Side view (world frame, env 0). The robot covers x = 0 .. DEMO_SPEED * clip length.
-        self.sim.default_visualizer_cfg = VisualizerCfg(eye=VIDEO_EYE, lookat=VIDEO_LOOKAT, focal_length=VIDEO_FOCAL_MM)
+        # Initial view; _follow_robot then tracks the robot each step.
+        self.sim.default_visualizer_cfg = VisualizerCfg(
+            eye=VIDEO_EYE_OFFSET, lookat=(0.0, 0.0, VIDEO_LOOKAT_Z), focal_length=VIDEO_FOCAL_MM
+        )
