@@ -52,7 +52,9 @@ def _spawn_fixed_platform(
         orientation: tuple[float, float, float, float] | None = None,
         **kwargs,
     ) -> Usd.Prim:
-        platform_prim = sim_utils.spawn_cuboid(
+        # The camera pole reuses this welding spawner with a cylinder.
+        spawn_shape = sim_utils.spawn_cylinder if isinstance(cfg, sim_utils.CylinderCfg) else sim_utils.spawn_cuboid
+        platform_prim = spawn_shape(
             prim_path,
             cfg,
             translation=translation,

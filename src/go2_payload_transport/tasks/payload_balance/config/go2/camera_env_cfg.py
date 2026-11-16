@@ -13,8 +13,12 @@ x forward, y left, z up, metres):
 import math
 
 import isaaclab.sim as sim_utils
+from isaaclab.assets import AssetBaseCfg
 from isaaclab.sensors import TiledCameraCfg
 from isaaclab.utils import configclass
+
+from .platform_env_cfg import SceneEntityCfg as PayloadSceneCfg
+from .platform_env_cfg import UnitreeGo2RandomPayloadMassEnvCfg, _spawn_fixed_platform
 
 # ---- placeholders -------------------------------------------------------------
 POLE_X = -0.16          # [m] rear end of the back
@@ -100,14 +104,25 @@ D435I_CAMERA = TiledCameraCfg(
 
 
 # ---- 3) a play-only env config -------------------------------------------------
-# from .platform_env_cfg import UnitreeGo2FlatPayloadEnvCfg_PLAY   # your existing class
-#
-# @configclass
-# class UnitreeGo2PayloadCameraEnvCfg_PLAY(UnitreeGo2FlatPayloadEnvCfg_PLAY):
-#     def __post_init__(self):
-#         super().__post_init__()
-#         self.scene.num_envs = 4
-#         self.scene.d435i = D435I_CAMERA
-#
-# Run with --enable_cameras. Read frames: env.unwrapped.scene["d435i"].data.output["rgb"]
-# and ["distance_to_image_plane"] (metres, shape [N, 480, 640, 1]).
+POLE_CFG = AssetBaseCfg(
+    prim_path="{ENV_REGEX_NS}/Robot/base/Pole",
+    init_state=AssetBaseCfg.InitialStateCfg(pos=POLE_POS_IN_BASE),
+    spawn=POLE_SPAWN.replace(func=_spawn_fixed_platform),
+)
+
+
+@configclass
+class PayloadCameraSceneCfg(PayloadSceneCfg):
+    pole: AssetBaseCfg = POLE_CFG
+    d435i: TiledCameraCfg = D435I_CAMERA
+
+
+@configclass
+class UnitreeGo2PayloadCameraEnvCfg_PLAY(UnitreeGo2RandomPayloadMassEnvCfg):
+    """Platform + payload + pole + D435i. Play/test only: run with --enable_cameras.
+
+    Read frames: env.unwrapped.scene["d435i"].data.output["rgb"] and
+    ["distance_to_image_plane"] (metres, shape [N, 480, 640, 1]).
+    """
+
+    scene: PayloadCameraSceneCfg = PayloadCameraSceneCfg(num_envs=4, env_spacing=2.5)
